@@ -1,0 +1,13 @@
+{
+  "name": "@carolinedanslesnuages/pauline",
+  "version": "0.0.0",
+  "description": "Les mêmes consignes d'agent (AGENTS.md, CLAUDE.md) dans tous vos dépôts : une base commune versionnée, les consignes propres à chaque projet intactes, une PR par dépôt.",
+  "type": "module",
+  "bin": { "pauline": "bin/pauline.mjs" },
+  "files": ["bin", "src", "consignes"],
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "keywords": ["agents-md", "claude-code", "ai-agents", "github", "conventions"],
+  "repository": { "type": "git", "url": "git+https://github.com/Carolinedanslesnuages/pauline.git" },
+  "license": "MIT"
+}
