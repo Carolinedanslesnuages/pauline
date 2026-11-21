@@ -1,9 +1,9 @@
-/** Accès à l'API GitHub avec votre jeton (GITHUB_TOKEN, GH_TOKEN, ou celui de « gh »). */
+/** GitHub API access with your token (GITHUB_TOKEN, GH_TOKEN, or the one from `gh`). */
 import { execFileSync } from 'node:child_process';
 
-export const BRANCHE = 'pauline/consignes';
+export const BRANCH = 'pauline/consignes';
 
-export function jeton() {
+export function token() {
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
   if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
   try {
@@ -13,64 +13,80 @@ export function jeton() {
   }
 }
 
-export function client(token = jeton(), base = process.env.PAULINE_API_BASE || 'https://api.github.com') {
-  async function appel(methode, chemin, corps) {
-    const r = await fetch(base + chemin, {
-      method: methode,
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'pauline', ...(corps ? { 'Content-Type': 'application/json' } : {}) },
-      body: corps ? JSON.stringify(corps) : undefined,
+export function client(authToken = token(), apiBase = process.env.PAULINE_API_BASE || 'https://api.github.com') {
+  async function call(method, path, body) {
+    const response = await fetch(apiBase + path, {
+      method,
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'pauline',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
     });
-    const texte = await r.text();
-    return { statut: r.status, donnees: texte ? JSON.parse(texte) : null };
+    const text = await response.text();
+    return { status: response.status, data: text ? JSON.parse(text) : null };
   }
-  const verifie = (r, quoi) => {
-    if (r.statut >= 300) throw new Error(`${quoi} : refusé par GitHub (${r.statut}${r.donnees && r.donnees.message ? ', ' + r.donnees.message : ''})`);
-    return r.donnees;
+  const checked = (result, what) => {
+    if (result.status >= 300) {
+      const detail = result.data && result.data.message ? `, ${result.data.message}` : '';
+      throw new Error(`${what} : refusé par GitHub (${result.status}${detail})`);
+    }
+    return result.data;
   };
-  const enc = (chemin) => chemin.split('/').map(encodeURIComponent).join('/');
+  const encodePath = (path) => path.split('/').map(encodeURIComponent).join('/');
 
   return {
-    async moi() {
-      return verifie(await appel('GET', '/user'), 'Jeton').login;
+    async currentUser() {
+      return checked(await call('GET', '/user'), 'Jeton').login;
     },
-    async depots(compte) {
-      const tous = [];
+    async repositories(owner) {
+      const allRepositories = [];
       for (let page = 1; ; page++) {
-        const l = verifie(await appel('GET', `/user/repos?per_page=100&page=${page}&affiliation=owner`), 'Liste des dépôts');
-        tous.push(...l);
-        if (l.length < 100) break;
+        const batch = checked(await call('GET', `/user/repos?per_page=100&page=${page}&affiliation=owner`), 'Liste des dépôts');
+        allRepositories.push(...batch);
+        if (batch.length < 100) break;
       }
-      return tous.filter((d) => d.owner.login.toLowerCase() === compte.toLowerCase());
+      return allRepositories.filter((repo) => repo.owner.login.toLowerCase() === owner.toLowerCase());
     },
-    async depot(nomComplet) {
-      return verifie(await appel('GET', `/repos/${nomComplet}`), `Dépôt ${nomComplet}`);
+    async repository(fullName) {
+      return checked(await call('GET', `/repos/${fullName}`), `Dépôt ${fullName}`);
     },
-    /** Contenu d'un fichier (texte et sha), ou null s'il n'existe pas. */
-    async fichier(nomComplet, chemin, ref) {
-      const r = await appel('GET', `/repos/${nomComplet}/contents/${enc(chemin)}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`);
-      if (r.statut === 404) return null;
-      const d = verifie(r, `Lecture de ${chemin}`);
-      return { texte: Buffer.from(d.content, 'base64').toString('utf8'), sha: d.sha };
+    /** A file's text and sha, or null when it does not exist. */
+    async file(fullName, path, ref) {
+      const query = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+      const result = await call('GET', `/repos/${fullName}/contents/${encodePath(path)}${query}`);
+      if (result.status === 404) return null;
+      const data = checked(result, `Lecture de ${path}`);
+      return { text: Buffer.from(data.content, 'base64').toString('utf8'), sha: data.sha };
     },
-    /** Remet la branche de travail sur la tête de la branche principale. */
-    async preparerBranche(nomComplet, principale) {
-      const tete = verifie(await appel('GET', `/repos/${nomComplet}/git/ref/heads/${enc(principale)}`), 'Branche principale').object.sha;
-      const r = await appel('POST', `/repos/${nomComplet}/git/refs`, { ref: `refs/heads/${BRANCHE}`, sha: tete });
-      if (r.statut === 422) verifie(await appel('PATCH', `/repos/${nomComplet}/git/refs/heads/${enc(BRANCHE)}`, { sha: tete, force: true }), 'Branche de travail');
-      else verifie(r, 'Branche de travail');
-    },
-    async ecrire(nomComplet, chemin, texte, message) {
-      const existant = await this.fichier(nomComplet, chemin, BRANCHE);
-      verifie(await appel('PUT', `/repos/${nomComplet}/contents/${enc(chemin)}`, { message, content: Buffer.from(texte, 'utf8').toString('base64'), branch: BRANCHE, ...(existant ? { sha: existant.sha } : {}) }), `Écriture de ${chemin}`);
-    },
-    /** Ouvre la PR, ou réutilise celle déjà ouverte. Renvoie son adresse. */
-    async pr(nomComplet, compte, principale, titre, corps) {
-      const ouvertes = verifie(await appel('GET', `/repos/${nomComplet}/pulls?state=open&head=${encodeURIComponent(`${compte}:${BRANCHE}`)}`), 'PR ouvertes');
-      if (ouvertes.length) {
-        verifie(await appel('PATCH', `/repos/${nomComplet}/pulls/${ouvertes[0].number}`, { title: titre, body: corps }), 'Mise à jour de la PR');
-        return ouvertes[0].html_url;
+    /** Resets the working branch onto the head of the default branch. */
+    async prepareBranch(fullName, defaultBranch) {
+      const headRef = checked(await call('GET', `/repos/${fullName}/git/ref/heads/${encodePath(defaultBranch)}`), 'Branche principale');
+      const headSha = headRef.object.sha;
+      const created = await call('POST', `/repos/${fullName}/git/refs`, { ref: `refs/heads/${BRANCH}`, sha: headSha });
+      if (created.status === 422) {
+        checked(await call('PATCH', `/repos/${fullName}/git/refs/heads/${encodePath(BRANCH)}`, { sha: headSha, force: true }), 'Branche de travail');
+      } else {
+        checked(created, 'Branche de travail');
       }
-      return verifie(await appel('POST', `/repos/${nomComplet}/pulls`, { title: titre, head: BRANCHE, base: principale, body: corps }), 'Ouverture de la PR').html_url;
+    },
+    async write(fullName, path, text, message) {
+      const existing = await this.file(fullName, path, BRANCH);
+      const body = { message, content: Buffer.from(text, 'utf8').toString('base64'), branch: BRANCH, ...(existing ? { sha: existing.sha } : {}) };
+      checked(await call('PUT', `/repos/${fullName}/contents/${encodePath(path)}`, body), `Écriture de ${path}`);
+    },
+    /** Opens the pull request, or reuses the one already open. Returns its URL. */
+    async pullRequest(fullName, owner, defaultBranch, title, body) {
+      const head = encodeURIComponent(`${owner}:${BRANCH}`);
+      const open = checked(await call('GET', `/repos/${fullName}/pulls?state=open&head=${head}`), 'PR ouvertes');
+      if (open.length) {
+        checked(await call('PATCH', `/repos/${fullName}/pulls/${open[0].number}`, { title, body }), 'Mise à jour de la PR');
+        return open[0].html_url;
+      }
+      const created = await call('POST', `/repos/${fullName}/pulls`, { title, head: BRANCH, base: defaultBranch, body });
+      return checked(created, 'Ouverture de la PR').html_url;
     },
   };
 }
