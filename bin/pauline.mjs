@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-/** Pauline : les mêmes consignes d'agent (AGENTS.md, CLAUDE.md) dans tous vos dépôts. */
+/** Pauline: the same agent guidelines (AGENTS.md, CLAUDE.md) in all your repositories. */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { etat, integrer, claude, empreinte } from '../src/bloc.mjs';
+import { state, merge, claudeFile, fingerprint } from '../src/block.mjs';
 import { client } from '../src/github.mjs';
 
-const AIDE = `Pauline · les mêmes consignes d'agent dans tous vos dépôts
+const HELP = `Pauline · les mêmes consignes d'agent dans tous vos dépôts
 
   pauline base                     affiche la base de consignes et son empreinte
   pauline verifier [dépôts…]       état de chaque dépôt, sans rien changer
@@ -23,122 +23,139 @@ const AIDE = `Pauline · les mêmes consignes d'agent dans tous vos dépôts
 Seul le bloc entre « pauline:debut » et « pauline:fin » est géré : le reste d'AGENTS.md
 (les consignes propres au projet) n'est jamais touché.`;
 
-const LIBELLES = {
-  absent: 'pas d’AGENTS.md',
-  'sans-bloc': 'AGENTS.md sans consignes communes',
-  'a-jour': 'à jour',
-  perime: 'consignes communes à mettre à jour',
-  modifie: 'bloc modifié à la main',
+const STATE_LABELS = {
+  missing: 'pas d’AGENTS.md',
+  'no-block': 'AGENTS.md sans consignes communes',
+  'up-to-date': 'à jour',
+  outdated: 'consignes communes à mettre à jour',
+  edited: 'bloc modifié à la main',
 };
 
-function options(args) {
-  const o = { cibles: [], visibilite: 'public', sauf: [] };
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === '--base') o.base = args[++i];
-    else if (a === '--sauf') o.sauf = String(args[++i] || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-    else if (a === '--prives') o.visibilite = 'private';
-    else if (a === '--tous') o.visibilite = 'all';
-    else if (a === '--forcer') o.forcer = true;
-    else if (a === '--oui') o.oui = true;
-    else if (a.startsWith('--')) throw new Error(`Option inconnue : ${a}. Tapez « pauline aide ».`);
-    else o.cibles.push(a);
+function parseOptions(args) {
+  const options = { targets: [], visibility: 'public', excluded: [] };
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === '--base') options.base = args[++index];
+    else if (argument === '--sauf') options.excluded = String(args[++index] || '').split(',').map((name) => name.trim().toLowerCase()).filter(Boolean);
+    else if (argument === '--prives') options.visibility = 'private';
+    else if (argument === '--tous') options.visibility = 'all';
+    else if (argument === '--forcer') options.force = true;
+    else if (argument === '--oui') options.yes = true;
+    else if (argument.startsWith('--')) throw new Error(`Option inconnue : ${argument}. Tapez « pauline aide ».`);
+    else options.targets.push(argument);
   }
-  return o;
+  return options;
 }
 
-const lireBase = (o) => readFileSync(o.base ? resolve(o.base) : new URL('../consignes/communes.md', import.meta.url), 'utf8');
+const readBase = (options) => readFileSync(options.base ? resolve(options.base) : new URL('../consignes/communes.md', import.meta.url), 'utf8');
 
-async function confirmer(o, question) {
-  if (o.oui) return true;
+async function confirm(options, question) {
+  if (options.yes) return true;
   if (!process.stdin.isTTY) throw new Error('Pas de terminal pour confirmer : ajoutez --oui.');
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ok = /^o/i.test((await rl.question(`${question} (o/N) `)).trim());
-  rl.close();
-  return ok;
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  const accepted = /^o/i.test((await prompt.question(`${question} (o/N) `)).trim());
+  prompt.close();
+  return accepted;
 }
 
-async function etats(gh, o, base) {
-  const compte = await gh.moi();
-  let depots;
-  if (o.cibles.length) depots = await Promise.all(o.cibles.map((n) => gh.depot(n.includes('/') ? n : `${compte}/${n}`)));
-  else depots = (await gh.depots(compte)).filter((d) => !d.archived && !d.fork && (o.visibilite === 'all' || d.visibility === o.visibilite));
-  depots = depots.filter((d) => !o.sauf.includes(d.name.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name));
-  const lignes = [];
-  for (const d of depots) {
-    const agents = await gh.fichier(d.full_name, 'AGENTS.md');
-    const cl = await gh.fichier(d.full_name, 'CLAUDE.md');
-    const e = etat(agents && agents.texte, base);
-    const claudeOk = !!cl && claude(cl.texte) === cl.texte;
-    lignes.push({ depot: d, agents, cl, etat: e, claudeOk });
+async function collectStates(github, options, base) {
+  const owner = await github.currentUser();
+  let repositories;
+  if (options.targets.length) {
+    repositories = await Promise.all(options.targets.map((name) => github.repository(name.includes('/') ? name : `${owner}/${name}`)));
+  } else {
+    repositories = (await github.repositories(owner)).filter((repo) => !repo.archived && !repo.fork && (options.visibility === 'all' || repo.visibility === options.visibility));
   }
-  return { compte, lignes };
+  repositories = repositories.filter((repo) => !options.excluded.includes(repo.name.toLowerCase())).sort((left, right) => left.name.localeCompare(right.name));
+  const reports = [];
+  for (const repo of repositories) {
+    const agents = await github.file(repo.full_name, 'AGENTS.md');
+    const claude = await github.file(repo.full_name, 'CLAUDE.md');
+    reports.push({
+      repo,
+      agents,
+      claude,
+      state: state(agents && agents.text, base),
+      claudeImports: !!claude && claudeFile(claude.text) === claude.text,
+    });
+  }
+  return { owner, reports };
 }
 
-function afficher(lignes) {
-  const larg = Math.max(...lignes.map((l) => l.depot.name.length));
-  for (const l of lignes) {
-    const ok = l.etat === 'a-jour' && l.claudeOk;
-    const notes = [LIBELLES[l.etat], ...(l.claudeOk ? [] : ['CLAUDE.md n’importe pas AGENTS.md'])];
-    console.log(`${ok ? '✓' : l.etat === 'modifie' ? '⚠' : '✗'} ${l.depot.name.padEnd(larg)}  ${ok ? 'à jour' : notes.filter((x) => x !== 'à jour').join(' · ')}`);
+const isDone = (report) => report.state === 'up-to-date' && report.claudeImports;
+
+function print(reports) {
+  const width = Math.max(...reports.map((report) => report.repo.name.length));
+  for (const report of reports) {
+    const notes = [report.state === 'up-to-date' ? null : STATE_LABELS[report.state], report.claudeImports ? null : 'CLAUDE.md n’importe pas AGENTS.md'].filter(Boolean);
+    const symbol = isDone(report) ? '✓' : report.state === 'edited' ? '⚠' : '✗';
+    console.log(`${symbol} ${report.repo.name.padEnd(width)}  ${isDone(report) ? 'à jour' : notes.join(' · ')}`);
   }
 }
 
-async function principal() {
-  const [commande, ...reste] = process.argv.slice(2);
-  if (!commande || ['aide', '--aide', '-h', '--help'].includes(commande)) return console.log(AIDE);
-  const o = options(reste);
-  const base = lireBase(o);
-
-  if (commande === 'base') return console.log(`Empreinte : ${empreinte(base)}\n\n${base}`);
-
-  if (commande === 'local') {
-    const dossier = resolve(o.cibles[0] || '.');
-    const fa = join(dossier, 'AGENTS.md');
-    const fc = join(dossier, 'CLAUDE.md');
-    const agents = existsSync(fa) ? readFileSync(fa, 'utf8') : null;
-    const e = etat(agents, base);
-    if (e === 'modifie' && !o.forcer) throw new Error('Le bloc de consignes communes a été modifié à la main. Reportez vos changements dans la base, ou relancez avec --forcer.');
-    if (e !== 'a-jour') writeFileSync(fa, integrer(agents, base, basename(dossier)));
-    const cl = existsSync(fc) ? readFileSync(fc, 'utf8') : null;
-    if (claude(cl) !== cl) writeFileSync(fc, claude(cl));
-    return console.log(e === 'a-jour' && claude(cl) === cl ? 'Déjà à jour.' : `AGENTS.md et CLAUDE.md à jour dans ${dossier}.`);
+function runLocal(options, base) {
+  const folder = resolve(options.targets[0] || '.');
+  const agentsPath = join(folder, 'AGENTS.md');
+  const claudePath = join(folder, 'CLAUDE.md');
+  const agents = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : null;
+  const current = state(agents, base);
+  if (current === 'edited' && !options.force) {
+    throw new Error('Le bloc de consignes communes a été modifié à la main. Reportez vos changements dans la base, ou relancez avec --forcer.');
   }
+  if (current !== 'up-to-date') writeFileSync(agentsPath, merge(agents, base, basename(folder)));
+  const claude = existsSync(claudePath) ? readFileSync(claudePath, 'utf8') : null;
+  if (claudeFile(claude) !== claude) writeFileSync(claudePath, claudeFile(claude));
+  console.log(current === 'up-to-date' && claudeFile(claude) === claude ? 'Déjà à jour.' : `AGENTS.md et CLAUDE.md à jour dans ${folder}.`);
+}
 
-  if (!['verifier', 'appliquer'].includes(commande)) throw new Error(`Commande inconnue : ${commande}. Tapez « pauline aide ».`);
-  const gh = client();
-  const { compte, lignes } = await etats(gh, o, base);
-  if (!lignes.length) return console.log('Aucun dépôt.');
-  afficher(lignes);
-  const aFaire = lignes.filter((l) => !(l.etat === 'a-jour' && l.claudeOk));
-  const bloques = aFaire.filter((l) => l.etat === 'modifie' && !o.forcer);
-  console.log(`\n${lignes.length} dépôt${lignes.length > 1 ? 's' : ''} · ${lignes.length - aFaire.length} à jour · ${aFaire.length} à mettre à jour${bloques.length ? ` (dont ${bloques.length} bloc${bloques.length > 1 ? 's' : ''} modifié${bloques.length > 1 ? 's' : ''} à la main : --forcer pour les remplacer)` : ''}`);
-  if (commande === 'verifier') {
-    if (aFaire.length) process.exitCode = 1;
+const plural = (count, word) => `${count} ${word}${count > 1 ? 's' : ''}`;
+
+async function runRemote(command, options, base) {
+  const github = client();
+  const { owner, reports } = await collectStates(github, options, base);
+  if (!reports.length) return console.log('Aucun dépôt.');
+  print(reports);
+  const pending = reports.filter((report) => !isDone(report));
+  const blocked = pending.filter((report) => report.state === 'edited' && !options.force);
+  const blockedNote = blocked.length ? ` (dont ${plural(blocked.length, 'bloc')} modifié${blocked.length > 1 ? 's' : ''} à la main : --forcer pour les remplacer)` : '';
+  console.log(`\n${plural(reports.length, 'dépôt')} · ${reports.length - pending.length} à jour · ${pending.length} à mettre à jour${blockedNote}`);
+  if (command === 'verifier') {
+    if (pending.length) process.exitCode = 1;
     return;
   }
-  const cibles = aFaire.filter((l) => !bloques.includes(l));
-  if (!cibles.length) return;
-  if (!(await confirmer(o, `\nOuvrir une PR dans ${cibles.length} dépôt${cibles.length > 1 ? 's' : ''} ?`))) return console.log('Rien n’a été changé.');
-  const titre = `docs: 🧾 consignes communes (Pauline ${empreinte(base)})`;
-  const corps = `Mise à jour des consignes communes d'agent par [Pauline](https://github.com/Carolinedanslesnuages/pauline).\n\n- \`AGENTS.md\` : seul le bloc entre \`pauline:debut\` et \`pauline:fin\` change ; les consignes propres au projet sont intactes.\n- \`CLAUDE.md\` importe \`AGENTS.md\` (\`@AGENTS.md\`), pour que Claude Code lise les mêmes consignes.\n\nEmpreinte de la base : \`${empreinte(base)}\`.`;
-  let echecs = 0;
-  for (const l of cibles) {
+  const updates = pending.filter((report) => !blocked.includes(report));
+  if (!updates.length) return;
+  if (!(await confirm(options, `\nOuvrir une PR dans ${plural(updates.length, 'dépôt')} ?`))) return console.log('Rien n’a été changé.');
+  const title = `docs: 🧾 consignes communes (Pauline ${fingerprint(base)})`;
+  const body = `Mise à jour des consignes communes d'agent par [Pauline](https://github.com/Carolinedanslesnuages/pauline).\n\n- \`AGENTS.md\` : seul le bloc entre \`pauline:debut\` et \`pauline:fin\` change ; les consignes propres au projet sont intactes.\n- \`CLAUDE.md\` importe \`AGENTS.md\` (\`@AGENTS.md\`), pour que Claude Code lise les mêmes consignes.\n\nEmpreinte de la base : \`${fingerprint(base)}\`.`;
+  let failures = 0;
+  for (const report of updates) {
+    const { repo } = report;
     try {
-      const principale = l.depot.default_branch;
-      await gh.preparerBranche(l.depot.full_name, principale);
-      if (l.etat !== 'a-jour') await gh.ecrire(l.depot.full_name, 'AGENTS.md', integrer(l.agents && l.agents.texte, base, l.depot.name), titre);
-      if (!l.claudeOk) await gh.ecrire(l.depot.full_name, 'CLAUDE.md', claude(l.cl && l.cl.texte), 'docs: 🧾 CLAUDE.md importe AGENTS.md (Pauline)');
-      console.log(`  ✓ ${l.depot.name} : ${await gh.pr(l.depot.full_name, compte, principale, titre, corps)}`);
-    } catch (e) {
-      echecs++;
-      console.log(`  ✗ ${l.depot.name} : ${e.message}`);
+      await github.prepareBranch(repo.full_name, repo.default_branch);
+      if (report.state !== 'up-to-date') await github.write(repo.full_name, 'AGENTS.md', merge(report.agents && report.agents.text, base, repo.name), title);
+      if (!report.claudeImports) await github.write(repo.full_name, 'CLAUDE.md', claudeFile(report.claude && report.claude.text), 'docs: 🧾 CLAUDE.md importe AGENTS.md (Pauline)');
+      console.log(`  ✓ ${repo.name} : ${await github.pullRequest(repo.full_name, owner, repo.default_branch, title, body)}`);
+    } catch (error) {
+      failures++;
+      console.log(`  ✗ ${repo.name} : ${error.message}`);
     }
   }
-  if (echecs) process.exitCode = 1;
+  if (failures) process.exitCode = 1;
 }
 
-principal().catch((e) => {
-  console.error(`pauline : ${e.message}`);
+async function main() {
+  const [command, ...rest] = process.argv.slice(2);
+  if (!command || ['aide', '--aide', '-h', '--help'].includes(command)) return console.log(HELP);
+  const options = parseOptions(rest);
+  const base = readBase(options);
+  if (command === 'base') return console.log(`Empreinte : ${fingerprint(base)}\n\n${base}`);
+  if (command === 'local') return runLocal(options, base);
+  if (['verifier', 'appliquer'].includes(command)) return runRemote(command, options, base);
+  throw new Error(`Commande inconnue : ${command}. Tapez « pauline aide ».`);
+}
+
+main().catch((error) => {
+  console.error(`pauline : ${error.message}`);
   process.exit(1);
 });
