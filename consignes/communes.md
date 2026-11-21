@@ -4,7 +4,9 @@ Ces consignes valent pour tous mes dépôts. Elles passent avant les habitudes d
 avant la sécurité.
 
 ### Langue
-- Écrire en français, avec des phrases courtes et simples, sans jargon inutile.
+- Le code est en anglais : noms de variables, fonctions, classes, fichiers, et commentaires.
+- Le reste est en français, avec des phrases courtes et simples, sans jargon inutile :
+  documentation, messages de commit et de PR, réponses.
 
 ### Commits et pull requests
 - Titres au format Conventional Commits, le type d'abord, puis l'emoji
@@ -13,6 +15,8 @@ avant la sécurité.
 - Une PR fait une seule chose. Sa description dit ce qui change, pourquoi, et comment c'est vérifié.
 
 ### Code
+- Des noms qui disent ce qu'ils contiennent : au moins 4 caractères, aucune abréviation
+  obscure, pas de `x`, `tmp`, `res` ou `val`. Écrire `user`, `index`, `response`, `value`.
 - Un fichier, une responsabilité : 400 lignes non vides au plus pour le code, 600 pour les tests
   (contrôlé par [Constance](https://github.com/Carolinedanslesnuages/constance)).
 - Toute fonctionnalité ou correction arrive avec ses tests. Ne jamais désactiver ni affaiblir un
