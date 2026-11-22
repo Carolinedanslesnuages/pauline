@@ -15,6 +15,7 @@ const HELP = `Pauline · les mêmes consignes d'agent dans tous vos dépôts
 
   Sans dépôt nommé : tous vos dépôts publics (ni archivés, ni fourches).
   --base <fichier>   votre base de consignes (défaut : celle de Pauline)
+  --profil appli-web ajoute les règles des applications web (SQL, mots de passe, validation)
   --sauf <a,b>       dépôts à laisser de côté
   --prives / --tous  dépôts privés, ou tous
   --forcer           remplacer un bloc modifié à la main
@@ -36,6 +37,7 @@ function parseOptions(args) {
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
     if (argument === '--base') options.base = args[++index];
+    else if (argument === '--profil') options.profile = args[++index];
     else if (argument === '--sauf') options.excluded = String(args[++index] || '').split(',').map((name) => name.trim().toLowerCase()).filter(Boolean);
     else if (argument === '--prives') options.visibility = 'private';
     else if (argument === '--tous') options.visibility = 'all';
@@ -47,7 +49,17 @@ function parseOptions(args) {
   return options;
 }
 
-const readBase = (options) => readFileSync(options.base ? resolve(options.base) : new URL('../consignes/communes.md', import.meta.url), 'utf8');
+/** Profiles add a section to the base, before « En cas de doute ». Names are public (--profil). */
+const PROFILES = { 'appli-web': 'appli-web.md' };
+
+function readBase(options) {
+  const base = readFileSync(options.base ? resolve(options.base) : new URL('../consignes/communes.md', import.meta.url), 'utf8');
+  if (!options.profile) return base;
+  if (!PROFILES[options.profile]) throw new Error(`Profil inconnu : ${options.profile}. Profils : ${Object.keys(PROFILES).join(', ')}.`);
+  const section = readFileSync(new URL(`../consignes/${PROFILES[options.profile]}`, import.meta.url), 'utf8').trim();
+  const doubtHeading = base.indexOf('### En cas de doute');
+  return doubtHeading < 0 ? `${base.trimEnd()}\n\n${section}\n` : `${base.slice(0, doubtHeading)}${section}\n\n${base.slice(doubtHeading)}`;
+}
 
 async function confirm(options, question) {
   if (options.yes) return true;

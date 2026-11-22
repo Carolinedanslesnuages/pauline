@@ -35,7 +35,7 @@ avant la sécurité.
 
 ### Sécurité et données
 - Aucun secret, jeton, mot de passe ni donnée personnelle réelle dans le dépôt, les tests ou les
-  journaux.
+  journaux. Les secrets sont lus depuis l'environnement, et `.env` est dans `.gitignore`.
 - Les workflows GitHub déclarent leurs droits (`permissions:`).
 - Ne jamais lancer `git push --force` sur la branche principale, ni supprimer des fichiers hors du
   projet.
