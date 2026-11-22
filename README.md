@@ -2,6 +2,9 @@
 
 Les mêmes consignes d'agent dans tous vos dépôts : une base commune, maintenue à un seul endroit.
 
+Le nom rend hommage à Pauline Kergomard (1838-1925), inspectrice générale des écoles maternelles
+à partir de 1881, qui a joué un rôle éminent dans leur mise en place : un même cadre pour toutes.
+
 Les assistants de code lisent un fichier de consignes à la racine du projet : `AGENTS.md` pour la
 plupart, `CLAUDE.md` pour Claude Code. D'un dépôt à l'autre, ces fichiers divergent vite : une
 règle ajoutée ici, oubliée là. Pauline garde **un bloc commun** identique partout, et laisse
