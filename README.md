@@ -38,6 +38,7 @@ Sans dépôt nommé, Pauline prend tous vos dépôts publics, ni archivés ni fo
 | Option | Rôle |
 |---|---|
 | `--base <fichier>` | Votre propre base de consignes (par défaut, [celle de Pauline](consignes/communes.md)). |
+| `--profil appli-web` | Ajoute les règles des applications web. |
 | `--sauf <a,b>` | Dépôts à laisser de côté. |
 | `--prives`, `--tous` | Dépôts privés, ou tous les dépôts. |
 | `--forcer` | Remplacer un bloc modifié à la main. |
@@ -62,6 +63,30 @@ Le jeton GitHub vient de `GITHUB_TOKEN`, `GH_TOKEN`, ou de `gh auth token`.
 
 `pauline verifier` sort en erreur (code 1) quand un dépôt n'est pas à jour : il peut servir de
 contrôle en intégration continue.
+
+## Le profil « applications web »
+
+```sh
+pauline appliquer mon-appli --profil appli-web
+```
+
+Ajoute à la base trois règles qui ne concernent que les applications web : requêtes SQL
+paramétrées, mots de passe hachés avec argon2 ou bcrypt, données validées côté serveur
+([`consignes/appli-web.md`](consignes/appli-web.md)). Les outils en ligne de commande n'en ont
+pas besoin : ils gardent une base plus courte, mieux suivie par les agents. Utilisez le même
+profil pour `verifier` et `appliquer`, sinon le bloc paraît à mettre à jour.
+
+## La skill « analyse-projet »
+
+[`skills/analyse-projet`](skills/analyse-projet/SKILL.md) est une liste de contrôle pour
+analyser un projet existant (sécurité, performance, gestion des erreurs, qualité, état du
+projet) et le format du compte rendu (gravité, emplacement, correction). C'est une skill, pas
+une consigne commune : l'agent ne la charge que quand on lui demande une analyse, au lieu de la
+lire dans chaque dépôt.
+
+```sh
+cp -r skills/analyse-projet ~/.claude/skills/
+```
 
 ## La base de consignes
 
