@@ -169,10 +169,10 @@ test('verifier ne change rien ; appliquer ouvre une PR, sauf pour un bloc modifi
 
 test('profil appli-web : trois règles de plus, avant « En cas de doute » ; profil inconnu refusé', async () => {
   const plain = (await runCli(['base'])).output;
-  const web = (await runCli(['base', '--profil', 'appli-web'])).output;
+  const webBase = (await runCli(['base', '--profil', 'appli-web'])).output;
   assert.doesNotMatch(plain, /### Application web/);
-  assert.match(web, /### Application web\n- Les requêtes SQL sont paramétrées[\s\S]*argon2 ou bcrypt[\s\S]*validées côté serveur[\s\S]*\n\n### En cas de doute/);
-  assert.notEqual(web.split('\n')[0], plain.split('\n')[0], 'empreinte différente');
+  assert.match(webBase, /### Application web\n- Les requêtes SQL sont paramétrées[\s\S]*argon2 ou bcrypt[\s\S]*validées côté serveur[\s\S]*\n\n### En cas de doute/);
+  assert.notEqual(webBase.split('\n')[0], plain.split('\n')[0], 'empreinte différente');
   const unknown = await runCli(['base', '--profil', 'mobile']);
   assert.equal(unknown.code, 1);
   assert.match(unknown.output, /Profil inconnu : mobile/);
