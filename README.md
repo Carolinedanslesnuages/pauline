@@ -26,7 +26,7 @@ Les migrations se font avec `npm run migrer`, jamais à la main.
 ## Utilisation
 
 ```sh
-npx github:Carolinedanslesnuages/pauline verifier
+npx @carolinedanslesnuages/pauline verifier
 ```
 
 | Commande | Ce qu'elle fait |
